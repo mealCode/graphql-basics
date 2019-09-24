@@ -1,5 +1,4 @@
 import uuidv4 from 'uuid/v4';
-import { EROFS } from 'constants';
 
 const Mutation = {
     createUser(parent, args, { db }, info) {
@@ -66,7 +65,7 @@ const Mutation = {
 
         return user;  
     },
-    createPost(parents, args, { db }, info) {
+    createPost(parents, args, { db, pubSub }, info) {
         const userExists = db.users.some(user => {
             return user.id === args.data.author;
         })
@@ -79,6 +78,19 @@ const Mutation = {
         }
 
         db.posts.push(post);
+        
+        // @subscribe from @post - see Subscription.js
+        if (args.data.published) {
+
+            pubSub.publish('post', { 
+                post: {
+                    mutation: 'CREATED',
+                    data: post
+                }
+             });
+
+        }
+
         return post;
     },
     updatePost(parents, args, cxt, info) {
@@ -108,7 +120,7 @@ const Mutation = {
 
         return deletedPost[0];
     },
-    createComment(parents, args, { db }, info) {
+    createComment(parents, args, { db, pubSub }, info) {
         const userExists = db.users.some(user => {
             return user.id === args.data.author;
         })
@@ -125,6 +137,9 @@ const Mutation = {
         }
 
         db.comments.push(comment);
+        // @subscribe from @comment - see Subscription.js
+        pubSub.publish(`comment ${args.data.post}`, { comment });
+
         return comment;
     },
     updateComment(parent, args, ctx, info) {
