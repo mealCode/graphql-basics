@@ -94,22 +94,51 @@ const Mutation = {
         return post;
     },
     updatePost(parents, args, cxt, info) {
-        const { db } = cxt;
+        const { db, pubSub } = cxt;
         const { id, data } = args;
 
         const post = db.posts.find(post => post.id === id);
+        const originalPost = { ...post };
         
         if (!post) throw new Error('Post not found.');
 
         if (typeof data.title === "string")  post.title = data.title;
         if (typeof data.body === "string") post.body = data.body;
-        if (typeof data.published === "boolean")  post.published = data.published;
+
+        if (typeof data.published === "boolean") {
+            post.published = data.published;
+
+            if (originalPost.published && !post.published) {
+                // deleted
+                pubSub.publish('post', {
+                    post: {
+                        mutation: 'DELETED',
+                        data: originalPost
+                    }
+                })
+            } else if (!originalPost.published && post.published) {
+                // created
+                pubSub.publish('post', {
+                    post: {
+                        mutation: 'CREATED',
+                        data: post
+                    }
+                })
+            }
+        } else if (post.published) {
+           pubSub.publish('post', {
+               post: {
+                   mutation: 'UPDATED',
+                   data: post
+               }
+           })
+        }
         
         return post;
     },
     deletePost(parents, args, ctx, info) {
         const { id } = args;
-        const { db } = ctx;
+        const { db, pubSub } = ctx;
 
         const postIndex = db.posts.findIndex(post => post.id === id);
 
@@ -117,6 +146,16 @@ const Mutation = {
 
         const deletedPost = db.posts.splice(postIndex, 1);
         db.comments = db.comments.filter(comment => comment.post !== id);
+
+         // @subscribe from @post - see Subscription.js
+         if (deletedPost[0].published) {
+            pubSub.publish('post', {
+                post: {
+                    mutation: 'DELETED',
+                    data: deletedPost[0]
+                }
+            })
+         }
 
         return deletedPost[0];
     },
@@ -138,13 +177,18 @@ const Mutation = {
 
         db.comments.push(comment);
         // @subscribe from @comment - see Subscription.js
-        pubSub.publish(`comment ${args.data.post}`, { comment });
+        pubSub.publish(`comment ${args.data.post}`, { 
+            comment: {
+                mutation: 'CREATED',
+                data: comment
+            }
+         });
 
         return comment;
     },
     updateComment(parent, args, ctx, info) {
         const { id, data } = args;
-        const { db } = ctx;
+        const { db, pubSub } = ctx;
 
         const comment = db.comments.find(comment => comment.id === id);
 
@@ -154,17 +198,33 @@ const Mutation = {
             comment.text = data.text;
         }
 
+        // @subscribe from @comment - see Subscription.js
+        pubSub.publish(`comment ${comment.post}`, {
+            comment: {
+                mutation: 'UPDATED',
+                data: comment
+            }
+        })
+
         return comment;
     },
     deleteComment(parent, args, ctx, info) {
         const { id } = args;
-        const { db } = ctx;
+        const { db, pubSub } = ctx;
 
         const commentIndex = db.comments.findIndex(comment => comment.id === id);
 
         if (commentIndex === -1) throw new Error('Comment not found.');
 
         const deletedComment = db.comments.splice(commentIndex, 1);
+
+        // @subscribe from @comment - see Subscription.js
+        pubSub.publish(`comment ${deletedComment.post}`, {
+            comment: {
+                mutation: 'DELETED',
+                data: deletedComment[0]
+            }
+        })
 
         return deletedComment[0];
     }
